@@ -119,8 +119,7 @@ class NetworkManager:
             # Bind to the port
             listener.bind(("0.0.0.0", port))
             listener.listen(1)
-            
-            # Store server info
+              # Store server info
             server_info = {
                 "server_id": server_id,
                 "transfer_id": transfer_id,
@@ -128,7 +127,9 @@ class NetworkManager:
                 "port": port,
                 "local_address": f"{self.local_ip}:{port}",
                 "public_address": None
-            }            # Handle different connection types
+            }
+            
+            # Handle different connection types
             if connection_type == ConnectionType.NGROK:
                 if not NGROK_AVAILABLE:
                     raise Exception("Ngrok is not available. Please install pyngrok package.")
@@ -145,6 +146,18 @@ class NetworkManager:
                     except Exception as e:
                         print(f"Warning cleaning tunnels: {e}")
                     
+                    # Try to apply ngrok optimizations if available
+                    try:
+                        import sys
+                        sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+                        from ngrok_transfer_fix import optimize_for_ngrok
+                        optimize_for_ngrok()
+                        print("Applied ngrok transfer optimizations")
+                    except ImportError:
+                        print("Ngrok transfer optimizations not available")
+                    except Exception as e:
+                        print(f"Error applying ngrok optimizations: {e}")
+                    
                     # Using TCP tunnel - better for raw socket connections like file transfers
                     # This requires a verified account (with payment method added)
                     self.ngrok_tunnel = ngrok.connect(port, "tcp")
@@ -153,6 +166,10 @@ class NetworkManager:
                     if self.ngrok_tunnel and hasattr(self.ngrok_tunnel, 'public_url'):
                         print(f"Success! Ngrok tunnel established: {self.ngrok_tunnel.public_url}")
                         server_info["public_address"] = self.ngrok_tunnel.public_url
+                        
+                        # Store ngrok metadata for later identification
+                        server_info["is_ngrok"] = True
+                        server_info["ngrok_url"] = self.ngrok_tunnel.public_url
                     else:
                         print("Error: Ngrok tunnel created but public_url not available")
                         server_info["public_address"] = "Ngrok Error: No public URL"

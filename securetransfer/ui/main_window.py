@@ -31,6 +31,15 @@ COLORS = {
     "muted": "#bdc3c7"         # Light gray
 }
 
+# Try to import the ngrok_transfer_fix module
+try:
+    import sys
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+    from ngrok_transfer_fix import is_ngrok_connection, optimize_for_ngrok
+    NGROK_FIX_AVAILABLE = True
+except ImportError:
+    NGROK_FIX_AVAILABLE = False
+
 
 class MainWindow:
     """Modern main window with file transfer functionality"""
@@ -465,7 +474,7 @@ class MainWindow:
         directory = filedialog.askdirectory(title="Select Save Location")
         if directory:
             self.save_location_var.set(directory)
-    
+            
     def start_send_transfer(self):
         """Start the file sending process"""
         if not hasattr(self, 'full_file_path') or not self.full_file_path:
@@ -481,6 +490,32 @@ class MainWindow:
             return
             
         connection_type = self.connection_type_var.get()
+        
+        # Check if using ngrok and show recommendations
+        if connection_type == ConnectionType.NGROK:
+            # Show ngrok-specific recommendations
+            if NGROK_FIX_AVAILABLE:
+                optimize_settings = messagebox.askyesno(
+                    "Ngrok Transfer Settings", 
+                    "Ngrok transfers require special settings for optimal reliability.\n\n"
+                    "Do you want to optimize settings for this transfer?\n\n"
+                    "(Recommended for encrypted files over 10MB)"
+                )
+                if optimize_settings:
+                    self.log_to_send("Applying ngrok transfer optimizations...")
+                    try:
+                        optimize_for_ngrok()
+                        self.log_to_send("Ngrok optimizations applied successfully")
+                    except Exception as e:
+                        self.log_to_send(f"Could not apply optimizations: {e}")
+            else:
+                messagebox.showinfo(
+                    "Ngrok Transfer", 
+                    "For best results with ngrok transfers:\n"
+                    "- Use smaller chunks (512KB recommended)\n"
+                    "- Avoid transferring files larger than 100MB\n"
+                    "- Ensure both parties have stable connections"
+                )
         
         # Generate transfer ID
         transfer_id = str(uuid.uuid4())

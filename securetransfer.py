@@ -26,12 +26,34 @@ def on_login_success(username, encryption_manager):
     app.run()
 
 
+def initialize_ngrok_fixes():
+    """Initialize the ngrok transfer fixes module"""
+    try:
+        print("Initializing ngrok transfer fixes...")
+        import ngrok_transfer_fix
+        # Apply the fixes to optimize for ngrok transfers
+        ngrok_transfer_fix.optimize_for_ngrok()
+        # Apply fixes to application modules
+        ngrok_transfer_fix.apply_fixes()
+        print("Ngrok transfer fixes loaded successfully")
+        return True
+    except ImportError:
+        print("Warning: Could not load ngrok_transfer_fix module")
+        return False
+    except Exception as e:
+        print(f"Error initializing ngrok fixes: {e}")
+        return False
+
+
 def main():
     """Application entry point"""
     try:
         # Set up the environment
         print("Setting up environment...")
         setup_environment()
+        
+        # Initialize ngrok fixes
+        initialize_ngrok_fixes()
         
         # Start with the login window
         print("Creating login window...")

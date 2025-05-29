@@ -261,11 +261,16 @@ class FileProcessor:
         
         # Sort chunks by index
         found_chunks.sort()
-        
-        # Decrypt chunks if they're encrypted
+          # Decrypt chunks if they're encrypted
         if is_encrypted:
             if not self.encryption_manager:
                 raise ValueError("File is encrypted but no encryption manager is available")
+            
+            # Check if this might be a ngrok transfer by examining the path or connection info
+            is_ngrok_transfer = False
+            if "ngrok" in transfer_dir or any("tcp.ap.ngrok.io" in f for f in os.listdir(transfer_dir) if isinstance(f, str)):
+                is_ngrok_transfer = True
+                print("Detected ngrok transfer - using enhanced decryption handling")
             
             for i, chunk_name in enumerate(found_chunks):
                 chunk_path = os.path.join(chunk_location, chunk_name)
@@ -273,8 +278,48 @@ class FileProcessor:
                 if self.progress_callback:
                     self.progress_callback(i, len(found_chunks), f"Decrypting chunk {i+1}/{len(found_chunks)}")
                 
-                # Decrypt the chunk
-                decrypted_path = self.encryption_manager.decrypt_file(chunk_path)
+                # For ngrok transfers, use enhanced decryption with retries
+                if is_ngrok_transfer:
+                    try:
+                        # Try to use ngrok_transfer_fix if available
+                        try:
+                            import sys
+                            sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+                            from ngrok_transfer_fix import decrypt_file_with_retries
+                            
+                            # Use retry-enabled decryption for ngrok transfers
+                            max_retries = 5
+                            decrypted_path = decrypt_file_with_retries(self.encryption_manager, chunk_path, max_retries=max_retries)
+                            print(f"Successfully decrypted with ngrok-enhanced method (attempt 1/{max_retries})")
+                            
+                        except ImportError as e:
+                            print(f"Could not import ngrok_transfer_fix: {e}, using standard decryption with retries")
+                            
+                            # Fallback to manual retry implementation
+                            max_retries = 5
+                            decrypted_path = None
+                            last_error = None
+                            
+                            for attempt in range(max_retries):
+                                try:
+                                    print(f"Decryption attempt {attempt + 1}/{max_retries}")
+                                    decrypted_path = self.encryption_manager.decrypt_file(chunk_path)
+                                    print(f"Decryption succeeded on attempt {attempt + 1}")
+                                    break
+                                except Exception as retry_error:
+                                    last_error = retry_error
+                                    print(f"Attempt {attempt + 1} failed: {retry_error}")
+                                    time.sleep(0.5 * (attempt + 1))  # Increasing delay before retry
+                            
+                            if not decrypted_path:
+                                raise ValueError(f"Failed after {max_retries} attempts: {last_error}")
+                            
+                    except Exception as e:
+                        raise ValueError(f"Failed to decrypt ngrok transfer: {e}. Try using a smaller chunk size (512KB recommended) and ensure stable connection.")
+                
+                else:
+                    # Standard decryption for non-ngrok transfers
+                    decrypted_path = self.encryption_manager.decrypt_file(chunk_path)
                 
                 # Replace the encrypted chunk with the decrypted one
                 os.remove(chunk_path)

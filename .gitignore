@@ -40,3 +40,8 @@ securetransfer/users/
 # Temporary files
 *.tmp
 temp/
+
+# Backups and repair files
+*.bak
+*.backup
+*.repair_backup
