@@ -28,6 +28,12 @@ build/
 *.db
 *.sqlite3
 
+# Data directory (contains user keys, transfers, downloads)
+securetransfer/data/
+
+# User directories (contains private keys and user data)
+securetransfer/users/
+
 # Logs
 *.log
 

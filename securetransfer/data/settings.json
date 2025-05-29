@@ -2,12 +2,15 @@
   "download_directory": "securetransfer\\data\\downloads",
   "default_port": 5000,
   "default_connection_type": "local",
-  "encryption_strength": "HIGH",
-  "signature_algorithm": "SHA256",
+  "encryption_strength": "SECP256R1",
+  "signature_algorithm": "SHA512",
   "theme": "dark",
   "auto_accept_transfers": false,
   "notify_on_complete": true,
   "max_concurrent_transfers": 3,
   "chunk_size": 2097152,
-  "ngrok_authtoken": "2xfd4mmuD0WQCkgbDalBGZTcf5D_3oshMCu7kfiPD1cXGkfWk"
+  "ngrok_authtoken": "2xfd4mmuD0WQCkgbDalBGZTcf5D_3oshMCu7kfiPD1cXGkfWk",
+  "ngrok_auth_token": "",
+  "ngrok_region": "us",
+  "font_size": 10
 }

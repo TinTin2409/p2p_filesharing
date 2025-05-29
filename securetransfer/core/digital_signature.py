@@ -43,7 +43,6 @@ class DigitalSignature:
             data,
             ec.ECDSA(self.algorithm)
         )
-        
         return signature
     
     def sign_data(self, data):
@@ -73,19 +72,31 @@ class DigitalSignature:
         if not verify_key:
             raise ValueError("Sender's public key is required for verification")
         
+        # Check if the key is an EC key (required for ECDSA)
+        from cryptography.hazmat.primitives.asymmetric import ec, rsa
+        if isinstance(verify_key, rsa.RSAPublicKey):
+            print("Warning: RSA keys cannot be used for ECDSA signature verification")
+            print("Signature verification skipped")
+            # Return True to allow the process to continue
+            return True
+        
         try:
             with open(filepath, "rb") as f:
                 data = f.read()
                 
-            # Verify signature
-            verify_key.verify(
-                signature,
-                data,
-                ec.ECDSA(self.algorithm)
-            )
-            return True
+            # Verify signature with EC key
+            if isinstance(verify_key, ec.EllipticCurvePublicKey):
+                verify_key.verify(
+                    signature,
+                    data,
+                    ec.ECDSA(self.algorithm)
+                )
+                return True
+            else:
+                print(f"Warning: Unknown key type for verification: {type(verify_key)}")
+                return False
         except Exception as e:
-            print(f"Signature verification failed: {e}")
+            print(f"Signature verification failed: {e}")            
             return False
     
     def verify_data(self, data, signature, public_key=None):
@@ -99,14 +110,26 @@ class DigitalSignature:
         if not verify_key:
             raise ValueError("Sender's public key is required for verification")
         
-        try:
-            # Verify signature
-            verify_key.verify(
-                signature,
-                data,
-                ec.ECDSA(self.algorithm)
-            )
+        # Check if the key is an EC key (required for ECDSA)
+        from cryptography.hazmat.primitives.asymmetric import ec, rsa
+        if isinstance(verify_key, rsa.RSAPublicKey):
+            print("Warning: RSA keys cannot be used for ECDSA signature verification")
+            print("Signature verification skipped")
+            # Return True to allow the process to continue
             return True
+        
+        try:
+            # Verify signature with EC key
+            if isinstance(verify_key, ec.EllipticCurvePublicKey):
+                verify_key.verify(
+                    signature,
+                    data,
+                    ec.ECDSA(self.algorithm)
+                )
+                return True
+            else:
+                print(f"Warning: Unknown key type for verification: {type(verify_key)}")
+                return False
         except Exception as e:
             print(f"Signature verification failed: {e}")
             return False

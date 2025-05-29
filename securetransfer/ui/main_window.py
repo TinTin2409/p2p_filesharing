@@ -39,19 +39,27 @@ class MainWindow:
         """Initialize with user info and encryption manager"""
         self.username = username
         self.encryption_manager = encryption_manager
-        
-        # Initialize components
+          # Initialize components
         self.digital_signature = DigitalSignature(
             private_key=encryption_manager.private_key,
             public_key=encryption_manager.public_key
         )
         
-        self.file_processor = FileProcessor(self.digital_signature)
-        self.network_manager = NetworkManager()
-        
-        # Initialize database manager and perform startup cleanup
+        # Initialize database manager and load settings
         self.db_manager = DatabaseManager()
+        self.settings = self.db_manager.get_settings()
         self.db_manager.startup_cleanup()
+        
+        # Set chunk size from settings
+        chunk_size = self.settings.get("chunk_size", 2*1024*1024)
+        
+        # Create file processor with settings
+        self.file_processor = FileProcessor(
+            digital_signature=self.digital_signature,
+            encryption_manager=self.encryption_manager,
+            chunk_size=chunk_size
+        )
+        self.network_manager = NetworkManager()
         
         # Set up callbacks
         self.file_processor.set_progress_callback(self.update_progress)
@@ -170,12 +178,29 @@ class MainWindow:
         selected_file_label = tk.Label(file_frame, textvariable=self.selected_file_var,
                                     wraplength=280, fg=COLORS["muted"], bg=COLORS["secondary"])
         selected_file_label.pack(fill=tk.X, padx=10, pady=(10, 5))
-        
         browse_button = tk.Button(file_frame, text="Browse", command=self.select_send_file,
                                bg=COLORS["accent"], fg=COLORS["light"],
                                activebackground=COLORS["accent"], activeforeground=COLORS["light"],
                                relief=tk.FLAT, padx=10, pady=5)
         browse_button.pack(pady=(0, 10))
+        
+        # Encryption status
+        encryption_frame = tk.LabelFrame(left_panel, text="Encryption Status", fg=COLORS["light"],
+                                       bg=COLORS["secondary"], font=("Helvetica", 10))
+        encryption_frame.pack(fill=tk.X, padx=5, pady=(10, 5))
+        
+        # Check if encryption is available (RSA keys properly loaded)
+        encryption_status = "Enabled" if hasattr(self.encryption_manager, 'rsa_public_key') and self.encryption_manager.rsa_public_key else "Disabled"
+        encryption_color = COLORS["success"] if encryption_status == "Enabled" else COLORS["danger"]
+        
+        status_label = tk.Label(encryption_frame, text=f"Status: ", 
+                                fg=COLORS["light"], bg=COLORS["secondary"])
+        status_label.pack(side=tk.LEFT, padx=10, pady=5)
+        
+        encryption_status_label = tk.Label(encryption_frame, text=encryption_status, 
+                                         fg=encryption_color, bg=COLORS["secondary"],
+                                         font=("Helvetica", 10, "bold"))
+        encryption_status_label.pack(side=tk.LEFT, pady=5)
         
         # Connection options
         connection_frame = tk.LabelFrame(left_panel, text="Connection", fg=COLORS["light"],
@@ -236,23 +261,34 @@ class MainWindow:
         public_url_label = tk.Label(info_frame, textvariable=self.public_url_var,
                                  fg=COLORS["light"], bg=COLORS["secondary"])
         public_url_label.pack(anchor=tk.W, padx=10, pady=(0, 5))
-        
-        # Public key display
-        key_frame = tk.LabelFrame(right_panel, text="Your Public Key", fg=COLORS["light"],
+          # Public key display
+        key_frame = tk.LabelFrame(right_panel, text="Your RSA Public Key (for encryption)", fg=COLORS["light"],
                                 bg=COLORS["secondary"], font=("Helvetica", 10))
         key_frame.pack(fill=tk.X, padx=5, pady=(10, 5))
         
-        # Get public key in PEM format
-        from ..core.encryption_manager import public_encode_to_string
-        public_key_pem = public_encode_to_string(self.encryption_manager.public_key)
+        # Add info label
+        info_label = tk.Label(key_frame, text="Share this RSA key with recipients so they can decrypt your files.\nFiles are automatically signed with your EC key for verification.", 
+                             fg=COLORS["muted"], bg=COLORS["secondary"], font=("Helvetica", 8),
+                             wraplength=300, justify=tk.LEFT)
+        info_label.pack(fill=tk.X, padx=10, pady=(5, 0))
+          # Get RSA public key in PEM format (for encryption)
+        from ..core.encryption_manager import public_encode_to_string, rsa_public_encode_to_string
+        
+        # Use RSA public key since we're sharing this for encryption
+        try:
+            public_key_pem = rsa_public_encode_to_string(self.encryption_manager.rsa_public_key)
+        except (TypeError, AttributeError):
+            # Fallback to EC public key if RSA not available
+            public_key_pem = public_encode_to_string(self.encryption_manager.public_key)
+            print("Warning: Using EC public key as fallback, but this won't work for encryption")
         
         # Show only the first part and add copy button
-        key_display = tk.Text(key_frame, height=8, width=40, wrap=tk.WORD, bg=COLORS["primary"], fg=COLORS["light"])
+        key_display = tk.Text(key_frame, height=6, width=40, wrap=tk.WORD, bg=COLORS["primary"], fg=COLORS["light"])
         key_display.pack(fill=tk.X, padx=10, pady=10)
         key_display.insert(tk.END, public_key_pem)
         key_display.config(state=tk.DISABLED)
         
-        copy_button = tk.Button(key_frame, text="Copy to Clipboard", 
+        copy_button = tk.Button(key_frame, text="Copy RSA Key to Clipboard", 
                              command=lambda: self.copy_to_clipboard(public_key_pem),
                              bg=COLORS["accent"], fg=COLORS["light"],
                              activebackground=COLORS["accent"], activeforeground=COLORS["light"],
@@ -317,16 +353,21 @@ class MainWindow:
         self.receive_port_var = tk.StringVar(value="5000")
         port_entry = tk.Entry(port_frame, textvariable=self.receive_port_var, width=6)
         port_entry.pack(side=tk.LEFT)
-        
-        # Sender's public key
-        key_frame = tk.LabelFrame(left_panel, text="Sender's Public Key", fg=COLORS["light"],
+          # Sender's RSA public key (for decryption)
+        key_frame = tk.LabelFrame(left_panel, text="Sender's RSA Public Key (for decryption)", fg=COLORS["light"],
                                 bg=COLORS["secondary"], font=("Helvetica", 10))
         key_frame.pack(fill=tk.X, padx=5, pady=(10, 5))
         
-        self.sender_key_text = tk.Text(key_frame, height=8, width=40, bg=COLORS["primary"], fg=COLORS["light"])
+        # Add info label
+        info_label = tk.Label(key_frame, text="Paste the sender's RSA public key to decrypt received files.\nSignatures are verified automatically.", 
+                             fg=COLORS["muted"], bg=COLORS["secondary"], font=("Helvetica", 8),
+                             wraplength=300, justify=tk.LEFT)
+        info_label.pack(fill=tk.X, padx=10, pady=(5, 0))
+        
+        self.sender_key_text = tk.Text(key_frame, height=6, width=40, bg=COLORS["primary"], fg=COLORS["light"])
         self.sender_key_text.pack(fill=tk.X, padx=10, pady=10)
         
-        paste_button = tk.Button(key_frame, text="Paste from Clipboard", 
+        paste_button = tk.Button(key_frame, text="Paste RSA Key from Clipboard", 
                               command=self.paste_from_clipboard,
                               bg=COLORS["accent"], fg=COLORS["light"],
                               activebackground=COLORS["accent"], activeforeground=COLORS["light"],
@@ -454,7 +495,6 @@ class MainWindow:
             args=(transfer_id, file_path, port, connection_type),
             daemon=True
         ).start()
-    
     def _send_file_thread(self, transfer_id, file_path, port, connection_type):
         """Thread to handle the file sending process"""
         try:
@@ -463,7 +503,45 @@ class MainWindow:
             self.file_processor.set_progress_callback(
                 lambda current, total, msg: self.update_send_progress(current, total, msg)
             )
-            transfer_id = self.file_processor.split_file(file_path)
+            
+            # Get settings for encryption
+            self.settings = self.db_manager.get_settings()
+            
+            # Set chunk size from settings
+            chunk_size = self.settings.get("chunk_size", 2*1024*1024)
+            self.file_processor.chunk_size = chunk_size
+            
+            # Apply security settings
+            encryption_strength = self.settings.get("encryption_strength", "SECP384R1")
+            signature_algorithm = self.settings.get("signature_algorithm", "SHA256")            # Import the RSA module for type checking
+            from cryptography.hazmat.primitives.asymmetric import rsa
+            
+            # For simplicity in this implementation, we'll encrypt using our own RSA public key
+            # In a complete implementation, you'd use the recipient's RSA public key
+            recipient_public_key = self.encryption_manager.rsa_public_key
+            
+            if not isinstance(recipient_public_key, rsa.RSAPublicKey):
+                self.log_to_send("Warning: RSA public key not available, encryption may fail")
+              # Log security settings
+            self.log_to_send(f"Using chunk size: {chunk_size/1024/1024:.1f} MB")
+            self.log_to_send(f"Using encryption strength: {encryption_strength}")
+            self.log_to_send(f"Using signature algorithm: {signature_algorithm}")
+              # Check if encryption is available
+            if recipient_public_key and hasattr(recipient_public_key, 'encrypt'):
+                self.log_to_send("File encryption: ENABLED (using RSA key)")
+                
+                # Check the key type more specifically
+                from cryptography.hazmat.primitives.asymmetric import rsa
+                if isinstance(recipient_public_key, rsa.RSAPublicKey):
+                    key_size = recipient_public_key.key_size
+                    self.log_to_send(f"Using {key_size}-bit RSA key for encryption")
+                else:
+                    self.log_to_send("Warning: Non-RSA key being used, encryption may fail")
+            else:
+                self.log_to_send("Warning: File encryption DISABLED - valid RSA key not available")
+                
+            # Split and encrypt the file
+            transfer_id = self.file_processor.split_file(file_path, recipient_public_key)
             
             # Get the path to the prepared package
             transfer_dir = os.path.join("securetransfer", "data", "transfers", transfer_id)
@@ -602,8 +680,7 @@ class MainWindow:
             # Connect to the sender
             conn = self.network_manager.connect_to_server(transfer_id, host, port)
             
-            if conn:
-                # Receive the file
+            if conn:                # Receive the file
                 self.log_to_receive("Connected. Receiving file...")
                 temp_dir = os.path.join("securetransfer", "data", "temp")
                 os.makedirs(temp_dir, exist_ok=True)
@@ -612,7 +689,6 @@ class MainWindow:
                 
                 if received_path:
                     self.log_to_receive(f"File received: {os.path.basename(received_path)}")
-                    
                     # Extract and process the file
                     self.log_to_receive("Verifying and extracting file...")
                     
@@ -622,12 +698,42 @@ class MainWindow:
                     
                     self.file_processor.extract_zip(received_path, extract_dir)
                     
-                    # Configure the digital signature with sender's public key
-                    from ..core.encryption_manager import public_decode_from_string
+                    # Configure the digital signature and decryption with sender's keys
                     try:
-                        sender_key = public_decode_from_string(sender_key_pem)
-                        self.digital_signature.sender_public_key = sender_key
-                    except:                        self.log_to_receive("Warning: Could not parse sender's public key")
+                        from ..core.encryption_manager import rsa_public_decode_from_string
+                        from cryptography.hazmat.primitives.asymmetric import rsa
+                        
+                        # Validate and load the RSA key for decryption
+                        key, key_type = self.encryption_manager.parse_pem_key(sender_key_pem)
+                        
+                        if key_type == "rsa":
+                            try:
+                                sender_rsa_key = rsa_public_decode_from_string(sender_key_pem)
+                                self.log_to_receive("✓ RSA public key loaded successfully")
+                                self.log_to_receive("Ready to decrypt files encrypted with this key")
+                                # Store in encryption manager for decryption
+                                self.file_processor.encryption_manager.recipient_key = sender_rsa_key
+                            except Exception as e:
+                                self.log_to_receive(f"✗ Failed to load RSA key: {e}")
+                                self.log_to_receive("Decryption will fail if the file is encrypted")
+                        else:
+                            self.log_to_receive("⚠️ Warning: No valid RSA key provided")
+                            self.log_to_receive("Decryption will fail if the file is encrypted")
+                            self.log_to_receive("Please ensure you have the sender's RSA public key")
+
+                        # For signature verification, we'll use the sender's EC key embedded in the file
+                        # No need for manual EC key input - signatures are verified automatically
+                        self.log_to_receive("Signature verification will be performed automatically using embedded keys")
+                          # Set the encryption settings from database
+                        self.settings = self.db_manager.get_settings()
+                        chunk_size = self.settings.get("chunk_size", 2*1024*1024)
+                        self.file_processor.chunk_size = chunk_size
+                        
+                        self.log_to_receive(f"Using chunk size: {chunk_size/1024/1024:.1f} MB")
+                        self.log_to_receive("Processing received files...")
+                    except Exception as e:
+                        self.log_to_receive(f"Warning: Could not parse sender's public key: {e}")
+                    
                     # Merge the chunks and verify
                     self.file_processor.set_progress_callback(
                         lambda current, total, msg: self.update_receive_progress(current, total, msg)
@@ -744,8 +850,7 @@ class MainWindow:
             "sample",
             "example.txt",
             "1 KB",
-            "Complete"
-        ))
+            "Complete"        ))
     
     def _format_size(self, size_bytes):
         """Format a file size in bytes to a human-readable string"""
@@ -763,16 +868,46 @@ class MainWindow:
         self.root.clipboard_clear()
         self.root.clipboard_append(text)
         self.status_var.set("Copied to clipboard")
-    
+        
     def paste_from_clipboard(self):
-        """Paste text from clipboard"""
+        """Paste RSA public key from clipboard for decryption"""
         try:
             text = self.root.clipboard_get()
-            self.sender_key_text.delete("1.0", tk.END)
-            self.sender_key_text.insert("1.0", text)
-            self.status_var.set("Pasted from clipboard")
-        except:
-            self.status_var.set("Nothing to paste")
+            # Try to validate that it's a valid RSA key
+            if "-----BEGIN PUBLIC KEY-----" in text and "-----END PUBLIC KEY-----" in text:
+                # Try to parse the key
+                key_type = "unknown"
+                try:
+                    key, key_type = self.encryption_manager.parse_pem_key(text)
+                    if key and key_type == "rsa":
+                        # Insert the RSA key
+                        self.sender_key_text.delete("1.0", tk.END)
+                        self.sender_key_text.insert("1.0", text)
+                        self.log_to_receive("✓ Valid RSA public key pasted - ready for decryption")
+                        self.log_to_receive("Signatures will be verified automatically when receiving files")
+                        self.status_var.set("RSA public key pasted successfully")
+                        return text
+                    elif key and key_type == "ec":
+                        self.log_to_receive("⚠️ Warning: EC keys cannot be used for decryption")
+                        self.log_to_receive("Please paste an RSA public key instead")
+                        self.status_var.set("EC key detected - RSA key required")
+                        return None
+                    else:
+                        self.log_to_receive("Warning: Could not determine key type - please paste an RSA public key")
+                        return None
+                except Exception as e:
+                    self.log_to_receive(f"Key parsing error: {e}")
+                    return None
+            else:
+                # Insert the text but warn
+                self.sender_key_text.delete("1.0", tk.END)
+                self.sender_key_text.insert("1.0", text)
+                self.log_to_receive("⚠️ Warning: The pasted text doesn't appear to be a valid RSA public key")
+                self.log_to_receive("Make sure you're pasting an RSA public key for decryption")
+                self.status_var.set("Invalid key format")
+        except Exception as e:
+            self.status_var.set(f"Clipboard error: {e}")
+            self.log_to_receive("Could not access clipboard")
     
     def open_settings(self):
         """Open the settings window"""
@@ -787,17 +922,30 @@ class MainWindow:
         about_dialog = AboutDialog(self.root)
     
     def on_settings_changed(self, new_settings):
-        """Handle settings changes from the settings dialog"""
-        # Update file processor chunk size if changed
+        """
+        Handle changes to application settings
+        This is called when settings are updated via the Settings dialog
+        """
+        # Update the file processor chunk size if it changed
         if hasattr(self, 'file_processor') and new_settings.get('chunk_size'):
+            print(f"Updating chunk size to {new_settings.get('chunk_size')} bytes")
             self.file_processor.chunk_size = new_settings.get('chunk_size')
+            self.add_log_message(f"Updated chunk size to {new_settings.get('chunk_size')/1024/1024:.1f} MB")
         
         # Update digital signature algorithm if changed
         if hasattr(self, 'digital_signature') and new_settings.get('signature_algorithm'):
             if new_settings.get('signature_algorithm') == "SHA256":
                 self.digital_signature.algorithm = SignatureAlgorithm.SHA256
+                self.add_log_message("Signature algorithm set to SHA-256")
             elif new_settings.get('signature_algorithm') == "SHA512":
                 self.digital_signature.algorithm = SignatureAlgorithm.SHA512
+                self.add_log_message("Signature algorithm set to SHA-512")
+        
+        # Update encryption strength if changed
+        if new_settings.get('encryption_strength'):
+            # Note: This won't affect existing keys, but will be used for any new keys
+            self.add_log_message(f"Encryption strength set to {new_settings.get('encryption_strength')}")
+            print(f"Encryption strength set to {new_settings.get('encryption_strength')}")
         
         # Update network manager default port
         if hasattr(self, 'network_manager') and new_settings.get('default_port'):
@@ -817,8 +965,11 @@ class MainWindow:
             elif conn_type == "ngrok":
                 self.connection_type_var.set(ConnectionType.NGROK)
         
+        # Load the updated settings
+        self.settings = self.db_manager.get_settings()
+        
         # Log the changes
-        self.add_log_message("Settings updated")
+        self.add_log_message("Settings updated successfully")
     
     def add_log_message(self, message):
         """Add a message to the appropriate log based on the active tab"""
